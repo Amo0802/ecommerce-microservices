@@ -55,6 +55,7 @@ services:
       - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
       - EUREKA_INSTANCE_PREFER_IP_ADDRESS=true
       - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888
+      - APP_JWT_SECRET=${JWT_SECRET:-404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
     depends_on:
       eureka-server:
         condition: service_healthy
@@ -70,7 +71,140 @@ services:
       start_period: 90s
     restart: unless-stopped
 
+  product-service:
+    build:
+      context: ./product-service
+      dockerfile: Dockerfile
+    container_name: product-service
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+      - EUREKA_INSTANCE_PREFER_IP_ADDRESS=true
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://product-db:5432/product_db
+      - SPRING_REDIS_HOST=product-redis
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      postgres-product:
+        condition: service_started
+      redis-product:
+        condition: service_started
+    networks:
+      - ecommerce-network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8081/actuator/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+
+  user-service:
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
+    container_name: user-service
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+      - EUREKA_INSTANCE_PREFER_IP_ADDRESS=true
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://user-db:5432/user_db
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      - MAIL_USERNAME=${MAIL_USERNAME:username@gmail.com}
+      - MAIL_PASSWORD=${MAIL_PASSWORD:password}
+      - JWT_SECRET=${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      postgres-user:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8084/actuator/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    restart: unless-stopped
+    ports:
+      - "8084:8084"
+
+  postgres-product:
+    image: postgres:16-alpine
+    container_name: product-db
+    environment:
+      POSTGRES_DB: product_db
+      POSTGRES_USER: product_user
+      POSTGRES_PASSWORD: product_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - product-db-data:/var/lib/postgresql/data
+    networks:
+      - ecommerce-network
+
+  redis-product:
+    image: redis:7-alpine
+    container_name: product-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - product-redis-data:/data
+    networks:
+      - ecommerce-network
+
+  postgres-user:
+    image: postgres:16-alpine
+    container_name: user-db
+    environment:
+      POSTGRES_DB: user_db
+      POSTGRES_USER: user_user
+      POSTGRES_PASSWORD: user_pass
+    ports:
+      - "5435:5432"
+    volumes:
+      - user-db-data:/var/lib/postgresql/data
+    networks:
+      - ecommerce-network
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - ecommerce-network
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
 networks:
   ecommerce-network:
     driver: bridge
     name: ecommerce-network
+
+volumes:
+  product-db-data:
+  product-redis-data:
+  user-db-data:
+  rabbitmq-data:
